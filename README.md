@@ -1,26 +1,15 @@
-# SDHT
-Class for DHT11, DHT12, DHT21, DHT22 sensors
+# BUCO PI
 
+BatStateU Customizable and Open Platform for IoT
 
-Results are in tenths.
+## Who and what is this for?
 
+### Who
 
-example:
+This is for anyone wanting a quick way to take cheap Internet of Things (IoT)
 
+### What
 
-celsius 217 = 21.7 degrees celsius
+This library for learning kits. It is designed to work on Buco Pi (these are open source chip designs also known as Esperrif ESP8266, NodeMCU, and packaged under a variety of manufacture names). This library is set up to use the Arduino programming language.
 
-humidity 455 = 45.5% humidity
-
-
-## TESTED ON
-
-DHT11
-
-DHT22
-
-arduino uno
-
-esp8266 D1 mini
-
-attiny
+## Dependencies
