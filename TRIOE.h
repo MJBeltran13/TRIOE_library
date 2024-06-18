@@ -1,11 +1,11 @@
-#ifndef BUCO_PI_H
-#define BUCO_PI_H
+#ifndef TRIOE_H
+#define TRIOE_H
 
 #include <Arduino.h>
 
-class BUCO_PI {
+class TRIOE {
   public:
-    BUCO_PI(int pin);
+    TRIOE(int pin);
     float readTemperature();
   private:
     int _pin;
