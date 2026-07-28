@@ -1,2 +1,7 @@
-BUCO_PI	KEYWORD1
-readTemperature	KEYWORD2
+TrioeClient	KEYWORD1
+begin	KEYWORD2
+addReading	KEYWORD2
+publish	KEYWORD2
+publishBatch	KEYWORD2
+pollCommands	KEYWORD2
+loop	KEYWORD2
