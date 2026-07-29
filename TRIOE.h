@@ -53,6 +53,7 @@ class TrioeClient {
   void setStatePollInterval(uint32_t intervalMs);
   void setChangeThreshold(float threshold);
   void setRetryDelays(uint32_t baseDelayMs, uint32_t maxDelayMs);
+  void setRequestTimeout(uint16_t timeoutMs);
   void setCACert(const char* certificate);
 
   ConnectionStatus connectionStatus() const;
@@ -92,11 +93,13 @@ class TrioeClient {
   bool valueChanged(const Reading& candidate) const;
   void rememberDelivered(const Reading& reading);
   bool postBatch();
+  bool shouldRetry(int httpStatus) const;
+  void discardPendingBatch();
   void scheduleRetry();
   bool isDue(uint32_t now, uint32_t dueAt) const;
   void copyText(char* destination, size_t destinationSize, const char* source);
 
-  String _endpoint, _commandEndpoint, _stateEndpoint, _apiKey;
+  String _endpoint, _commandEndpoint, _stateEndpoint, _apiKey, _sessionId;
   WiFiClientSecure _secureClient;
   HTTPClient _http;
   Reading _queue[TRIOE_MAX_QUEUED_READINGS];
@@ -112,6 +115,7 @@ class TrioeClient {
   uint32_t _statePollIntervalMs = 5000;
   uint32_t _nextPublishAt = 0, _nextCommandPollAt = 0, _nextStatePollAt = 0, _retryAt = 0;
   uint32_t _retryBaseDelayMs = 1000, _retryMaxDelayMs = 60000;
+  uint16_t _requestTimeoutMs = 10000;
   float _changeThreshold = 0.0f;
   int _lastHttpStatus = 0;
   bool _started = false, _certificateConfigured = false;

@@ -1,22 +1,20 @@
 #include <WiFi.h>
 #include <TRIOE.h>
+#include <TRIOE_ROOT_CA.h>
 
 const char* WIFI_SSID = "YOUR_WIFI_SSID";
 const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
 const char* STATE_URL =
     "https://hub.trioe.dev/api/v1/devices/YOUR_DEVICE_ID/state/";
-const char* API_KEY = "YOUR_8_DIGIT_API_KEY";
+const char* API_KEY = "YOUR_DEVICE_API_KEY";
 
 TrioeClient trioe(STATE_URL, API_KEY);
 
 void setup() {
   Serial.begin(115200);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  trioe.setCACert(TRIOE_ROOT_CA);
   trioe.setStateEndpoint(STATE_URL);
-  trioe.begin();
-}
-
-void loop() {
   trioe.onReading("temperature", [](float value1) {
     Serial.print("Temperature: ");
     Serial.print(value1);
@@ -40,5 +38,11 @@ void loop() {
   });
 
   trioe.setStatePollInterval(5000);
+  if (!trioe.begin()) {
+    Serial.println("TRIOE setup failed: check endpoint, API key, and CA certificate.");
+  }
+}
+
+void loop() {
   trioe.loop();
 }

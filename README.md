@@ -7,7 +7,7 @@
 1. Install **ArduinoJson 6** using Arduino Library Manager.
 2. Add the TRIOE library to your Arduino libraries folder.
 3. Include `WiFi.h` and `TRIOE.h` in your sketch.
-4. Create a device in TRIOE Hub and copy its eight-character API key.
+4. Create a device in TRIOE Hub and copy its API key. The key is displayed only once.
 
 Never publish real Wi-Fi credentials or API keys in source control.
 
@@ -18,12 +18,13 @@ This example uses dummy data, so it can be tested before physical sensors are co
 ```cpp
 #include <WiFi.h>
 #include <TRIOE.h>
+#include <TRIOE_ROOT_CA.h>
 
 const char* WIFI_SSID = "YOUR_WIFI_SSID";
 const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
 const char* TELEMETRY_URL =
     "https://hub.trioe.dev/api/v1/devices/YOUR_DEVICE_ID/telemetry/";
-const char* API_KEY = "YOUR_8_DIGIT_API_KEY";
+const char* API_KEY = "YOUR_DEVICE_API_KEY";
 
 TrioeClient trioe(TELEMETRY_URL, API_KEY);
 
@@ -31,9 +32,12 @@ void setup() {
   Serial.begin(115200);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
+  trioe.setCACert(TRIOE_ROOT_CA);
   trioe.setReportingInterval(30000); // Publish every 30 seconds.
   trioe.setChangeThreshold(0.2f);    // Ignore smaller numeric changes.
-  trioe.begin();
+  if (!trioe.begin()) {
+    Serial.println("TRIOE setup failed: check endpoint, API key, and CA certificate.");
+  }
 }
 
 void loop() {
@@ -59,12 +63,13 @@ Use named callbacks to receive only the streams your device needs.
 ```cpp
 #include <WiFi.h>
 #include <TRIOE.h>
+#include <TRIOE_ROOT_CA.h>
 
 const char* WIFI_SSID = "YOUR_WIFI_SSID";
 const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
 const char* STATE_URL =
     "https://hub.trioe.dev/api/v1/devices/YOUR_DEVICE_ID/state/";
-const char* API_KEY = "YOUR_8_DIGIT_API_KEY";
+const char* API_KEY = "YOUR_DEVICE_API_KEY";
 
 TrioeClient trioe(STATE_URL, API_KEY);
 
@@ -72,11 +77,8 @@ void setup() {
   Serial.begin(115200);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
+  trioe.setCACert(TRIOE_ROOT_CA);
   trioe.setStateEndpoint(STATE_URL);
-  trioe.begin();
-}
-
-void loop() {
   trioe.onReading("temperature", [](float value1) {
     Serial.print("Temperature: ");
     Serial.print(value1);
@@ -100,6 +102,12 @@ void loop() {
   });
 
   trioe.setStatePollInterval(5000); // Fetch every five seconds.
+  if (!trioe.begin()) {
+    Serial.println("TRIOE setup failed: check endpoint, API key, and CA certificate.");
+  }
+}
+
+void loop() {
   trioe.loop();
 }
 ```
@@ -132,6 +140,8 @@ void loop() {
 - `setChangeThreshold(value)` prevents small numeric changes from being sent.
 - `setStatePollInterval(milliseconds)` controls current-state fetching.
 - `setRetryDelays(base, maximum)` controls exponential retry timing.
+- `setRequestTimeout(milliseconds)` controls the HTTPS request timeout.
+- `setCACert(certificate)` is required for secure HTTPS. `TRIOE_ROOT_CA.h` provides the current Hub trust anchor.
 
 ## Limits and memory
 

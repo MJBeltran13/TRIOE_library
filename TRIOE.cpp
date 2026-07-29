@@ -1,4 +1,5 @@
 #include "TRIOE.h"
+#include <esp_system.h>
 #include <math.h>
 
 namespace { constexpr uint8_t kNumber = 0, kInteger = 1, kBoolean = 2, kString = 3; }
@@ -8,7 +9,15 @@ TrioeClient::TrioeClient(const char* endpoint, const char* apiKey)
 
 bool TrioeClient::begin() {
   if (_endpoint.length() == 0 || _apiKey.length() == 0 || !_certificateConfigured) return false;
-  _http.setReuse(true); _started = true; _nextPublishAt = _nextCommandPollAt = _nextStatePollAt = millis(); return true;
+  char session[33];
+  snprintf(session, sizeof(session), "%08lx%08lx%08lx%08lx",
+           static_cast<unsigned long>(esp_random()),
+           static_cast<unsigned long>(esp_random()),
+           static_cast<unsigned long>(esp_random()),
+           static_cast<unsigned long>(esp_random()));
+  _sessionId = session;
+  _http.setReuse(true); _http.setTimeout(_requestTimeoutMs);
+  _started = true; _nextPublishAt = _nextCommandPollAt = _nextStatePollAt = millis(); return true;
 }
 void TrioeClient::loop() {
   if (!_started) return;
@@ -57,20 +66,30 @@ bool TrioeClient::fetchState() {
     if (_stateHandler) _stateHandler(stream);
     const char* name = stream["name"] | "";
     JsonVariantConst value = stream["current_value"];
+    const char* type = stream["type"] | "";
     if (!name[0]) continue;
     for (uint8_t i = 0; i < _readingSubscriptionCount; ++i) {
-      if (value.is<float>() && !strcmp(name, _readingSubscriptions[i].name) && _readingSubscriptions[i].handler) {
+      if ((!strcmp(type, "number") || !strcmp(type, "integer")) &&
+          value.is<double>() && !strcmp(name, _readingSubscriptions[i].name) && _readingSubscriptions[i].handler) {
         _readingSubscriptions[i].handler(value.as<float>());
       }
     }
     for (uint8_t i = 0; i < _textSubscriptionCount; ++i) {
-      if (value.is<const char*>() && !strcmp(name, _textSubscriptions[i].name) && _textSubscriptions[i].handler) {
+      if (!strcmp(type, "string") && value.is<const char*>() &&
+          !strcmp(name, _textSubscriptions[i].name) && _textSubscriptions[i].handler) {
         _textSubscriptions[i].handler(value.as<const char*>());
       }
     }
     for (uint8_t i = 0; i < _booleanSubscriptionCount; ++i) {
-      if (value.is<bool>() && !strcmp(name, _booleanSubscriptions[i].name) && _booleanSubscriptions[i].handler) {
-        _booleanSubscriptions[i].handler(value.as<bool>());
+      if (!strcmp(type, "boolean") && !strcmp(name, _booleanSubscriptions[i].name) &&
+          _booleanSubscriptions[i].handler) {
+        if (value.is<bool>()) {
+          _booleanSubscriptions[i].handler(value.as<bool>());
+        } else if (value.is<const char*>()) {
+          const char* text = value.as<const char*>();
+          if (!strcasecmp(text, "true") || !strcmp(text, "1")) _booleanSubscriptions[i].handler(true);
+          else if (!strcasecmp(text, "false") || !strcmp(text, "0")) _booleanSubscriptions[i].handler(false);
+        }
       }
     }
   }
@@ -127,7 +146,8 @@ void TrioeClient::setCommandPollInterval(uint32_t ms) { _commandPollIntervalMs =
 void TrioeClient::setStatePollInterval(uint32_t ms) { _statePollIntervalMs = ms < 1000 ? 1000 : ms; }
 void TrioeClient::setChangeThreshold(float value) { _changeThreshold = value < 0 ? 0 : value; }
 void TrioeClient::setRetryDelays(uint32_t base, uint32_t maximum) { _retryBaseDelayMs = base; _retryMaxDelayMs = maximum < base ? base : maximum; }
-void TrioeClient::setCACert(const char* certificate) { if (certificate) { _secureClient.setCACert(certificate); _certificateConfigured = true; } }
+void TrioeClient::setRequestTimeout(uint16_t timeoutMs) { _requestTimeoutMs = timeoutMs < 1000 ? 1000 : timeoutMs; _http.setTimeout(_requestTimeoutMs); }
+void TrioeClient::setCACert(const char* certificate) { if (certificate && certificate[0]) { _secureClient.setCACert(certificate); _certificateConfigured = true; } }
 TrioeClient::ConnectionStatus TrioeClient::connectionStatus() const { return _connectionStatus; }
 TrioeClient::DeliveryStatus TrioeClient::deliveryStatus() const { return _deliveryStatus; }
 bool TrioeClient::isConnected() const { return _connectionStatus == ConnectionStatus::Connected; }
@@ -150,7 +170,7 @@ bool TrioeClient::queueText(const char* name, const char* value, uint8_t type, c
   _queue[_queueCount++] = reading; _deliveryStatus = DeliveryStatus::Queued; return true;
 }
 bool TrioeClient::valueChanged(const Reading& candidate) const {
-  for (uint8_t i = 0; i < _deliveredCount; ++i) { const Reading& old = _delivered[i]; if (strcmp(old.name, candidate.name) || old.type != candidate.type) continue; return candidate.type <= kInteger ? fabs(candidate.number - old.number) >= _changeThreshold : strcmp(candidate.text, old.text) != 0; }
+  for (uint8_t i = 0; i < _deliveredCount; ++i) { const Reading& old = _delivered[i]; if (strcmp(old.name, candidate.name) || old.type != candidate.type) continue; if (candidate.type <= kInteger) { const double difference = fabs(candidate.number - old.number); return difference > 0 && (_changeThreshold == 0 || difference >= _changeThreshold); } return strcmp(candidate.text, old.text) != 0; }
   return true;
 }
 void TrioeClient::rememberDelivered(const Reading& reading) {
@@ -158,14 +178,16 @@ void TrioeClient::rememberDelivered(const Reading& reading) {
   if (_deliveredCount < TRIOE_MAX_QUEUED_READINGS) _delivered[_deliveredCount++] = reading;
 }
 bool TrioeClient::postBatch() {
-  _deliveryStatus = DeliveryStatus::Sending; if (_pendingSequence == 0) _pendingSequence = ++_sequence; StaticJsonDocument<TRIOE_JSON_DOCUMENT_SIZE> doc; doc["sequence"] = _pendingSequence; JsonArray values = doc.createNestedArray("readings");
+  _deliveryStatus = DeliveryStatus::Sending; if (_pendingSequence == 0) _pendingSequence = ++_sequence; StaticJsonDocument<TRIOE_JSON_DOCUMENT_SIZE> doc; doc["session_id"] = _sessionId; doc["sequence"] = _pendingSequence; JsonArray values = doc.createNestedArray("readings");
   for (uint8_t i = 0; i < _queueCount; ++i) { const Reading& r = _queue[i]; JsonObject item = values.createNestedObject(); item["name"] = r.name; item["unit"] = r.unit; if (r.type == kNumber) { item["type"] = "number"; item["value"] = r.number; } else if (r.type == kInteger) { item["type"] = "integer"; item["value"] = static_cast<int>(r.number); } else if (r.type == kBoolean) { item["type"] = "boolean"; item["value"] = !strcmp(r.text, "true"); } else { item["type"] = "string"; item["value"] = r.text; } }
   if (doc.overflowed()) { _deliveryStatus = DeliveryStatus::Failed; return false; }
   String payload; serializeJson(doc, payload); if (!_http.begin(_secureClient, _endpoint)) { scheduleRetry(); return false; }
   _http.setReuse(true); _http.addHeader("Content-Type", "application/json"); _http.addHeader("Authorization", "Bearer " + _apiKey); _lastHttpStatus = _http.POST(payload); _http.end();
-  if (_lastHttpStatus < 200 || _lastHttpStatus >= 300) { scheduleRetry(); return false; }
+  if (_lastHttpStatus < 200 || _lastHttpStatus >= 300) { if (shouldRetry(_lastHttpStatus)) scheduleRetry(); else discardPendingBatch(); return false; }
   for (uint8_t i = 0; i < _queueCount; ++i) rememberDelivered(_queue[i]); _queueCount = 0; _lastAcceptedSequence = _pendingSequence; _pendingSequence = 0; _retryAttempt = 0; _retryAt = 0; _nextPublishAt = millis() + _reportingIntervalMs; _deliveryStatus = DeliveryStatus::Delivered; return true;
 }
+bool TrioeClient::shouldRetry(int status) const { return status <= 0 || status == 408 || status == 425 || status == 429 || status >= 500; }
+void TrioeClient::discardPendingBatch() { _queueCount = 0; _pendingSequence = 0; _retryAttempt = 0; _retryAt = 0; _nextPublishAt = millis() + _reportingIntervalMs; _deliveryStatus = DeliveryStatus::Failed; }
 void TrioeClient::scheduleRetry() { const uint8_t exponent = _retryAttempt > 6 ? 6 : _retryAttempt++; uint32_t delayMs = _retryBaseDelayMs << exponent; if (delayMs > _retryMaxDelayMs || delayMs < _retryBaseDelayMs) delayMs = _retryMaxDelayMs; _retryAt = millis() + delayMs + (delayMs / 4 ? random(delayMs / 4) : 0); _deliveryStatus = DeliveryStatus::Retrying; }
 bool TrioeClient::isDue(uint32_t now, uint32_t dueAt) const { return static_cast<int32_t>(now - dueAt) >= 0; }
 void TrioeClient::copyText(char* target, size_t size, const char* source) { if (!source) { target[0] = '\0'; return; } strlcpy(target, source, size); }
