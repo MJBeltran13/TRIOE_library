@@ -7,8 +7,7 @@ TrioeClient::TrioeClient(const char* endpoint, const char* apiKey)
     : _endpoint(endpoint ? endpoint : ""), _apiKey(apiKey ? apiKey : "") {}
 
 bool TrioeClient::begin() {
-  if (_endpoint.length() == 0 || _apiKey.length() == 0) return false;
-  if (_insecureTls) _secureClient.setInsecure();
+  if (_endpoint.length() == 0 || _apiKey.length() == 0 || !_certificateConfigured) return false;
   _http.setReuse(true); _started = true; _nextPublishAt = _nextCommandPollAt = millis(); return true;
 }
 void TrioeClient::loop() {
@@ -47,8 +46,7 @@ void TrioeClient::setReportingInterval(uint32_t ms) { _reportingIntervalMs = ms;
 void TrioeClient::setCommandPollInterval(uint32_t ms) { _commandPollIntervalMs = ms; }
 void TrioeClient::setChangeThreshold(float value) { _changeThreshold = value < 0 ? 0 : value; }
 void TrioeClient::setRetryDelays(uint32_t base, uint32_t maximum) { _retryBaseDelayMs = base; _retryMaxDelayMs = maximum < base ? base : maximum; }
-void TrioeClient::setInsecureTls(bool enabled) { _insecureTls = enabled; }
-void TrioeClient::setCACert(const char* certificate) { if (certificate) { _secureClient.setCACert(certificate); _insecureTls = false; } }
+void TrioeClient::setCACert(const char* certificate) { if (certificate) { _secureClient.setCACert(certificate); _certificateConfigured = true; } }
 TrioeClient::ConnectionStatus TrioeClient::connectionStatus() const { return _connectionStatus; }
 TrioeClient::DeliveryStatus TrioeClient::deliveryStatus() const { return _deliveryStatus; }
 bool TrioeClient::isConnected() const { return _connectionStatus == ConnectionStatus::Connected; }

@@ -38,7 +38,6 @@ class TrioeClient {
   void setCommandPollInterval(uint32_t intervalMs);
   void setChangeThreshold(float threshold);
   void setRetryDelays(uint32_t baseDelayMs, uint32_t maxDelayMs);
-  void setInsecureTls(bool enabled);
   void setCACert(const char* certificate);
 
   ConnectionStatus connectionStatus() const;
@@ -82,7 +81,7 @@ class TrioeClient {
   uint32_t _retryBaseDelayMs = 1000, _retryMaxDelayMs = 60000;
   float _changeThreshold = 0.0f;
   int _lastHttpStatus = 0;
-  bool _started = false, _insecureTls = true;
+  bool _started = false, _certificateConfigured = false;
   ConnectionStatus _connectionStatus = ConnectionStatus::Disconnected;
   DeliveryStatus _deliveryStatus = DeliveryStatus::Idle;
   CommandHandler _commandHandler = nullptr;

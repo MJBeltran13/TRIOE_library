@@ -19,8 +19,9 @@ TrioeClient trioe(
 
 void setup() {
   WiFi.begin("YOUR_WIFI_SSID", "YOUR_WIFI_PASSWORD");
-  trioe.setReportingInterval(30000);
-  trioe.setChangeThreshold(0.2f);
+  trioe.setCACert("-----BEGIN CERTIFICATE-----\\n...CA CERTIFICATE...\\n-----END CERTIFICATE-----\\n");
+  trioe.setReportingInterval(30000); // Send at most once every 30 seconds (value is in milliseconds).
+  trioe.setChangeThreshold(0.2f);    // Send numeric values only after they change by 0.2 or more.
   trioe.begin();
 }
 
@@ -46,4 +47,4 @@ Use `setReportingInterval()`, `setChangeThreshold()`, and `setRetryDelays()` to 
 
 The default queue holds `TRIOE_MAX_QUEUED_READINGS` (16) unique stream names. Each name is 64 bytes, unit 50 bytes, and string value 128 bytes. The JSON document defaults to `TRIOE_JSON_DOCUMENT_SIZE` (4096 bytes); the client rejects an oversized document instead of sending malformed JSON. The Hub accepts up to 250 readings and 256 KB per batch; 16 readings is the recommended ESP32 default.
 
-Override the two macros before including `TRIOE.h` only after checking free heap. `setInsecureTls(true)` is enabled by default for classroom/self-signed deployments; use `setCACert()` in production.
+Override the two macros before including `TRIOE.h` only after checking free heap. TLS certificate validation is mandatory: call `setCACert()` with the CA certificate for your Hub before `begin()`. The library does not call `setInsecure()` and never prints API keys to Serial.
