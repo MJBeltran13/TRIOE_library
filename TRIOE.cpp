@@ -8,7 +8,7 @@ TrioeClient::TrioeClient(const char* endpoint, const char* apiKey)
 
 bool TrioeClient::begin() {
   if (_endpoint.length() == 0 || _apiKey.length() == 0 || !_certificateConfigured) return false;
-  _http.setReuse(true); _started = true; _nextPublishAt = _nextCommandPollAt = millis(); return true;
+  _http.setReuse(true); _started = true; _nextPublishAt = _nextCommandPollAt = _nextStatePollAt = millis(); return true;
 }
 void TrioeClient::loop() {
   if (!_started) return;
@@ -17,6 +17,8 @@ void TrioeClient::loop() {
   const uint32_t now = millis();
   if (_queueCount && isDue(now, _nextPublishAt) && isDue(now, _retryAt)) publishBatch();
   if (_commandHandler && _commandEndpoint.length() && isDue(now, _nextCommandPollAt)) pollCommands();
+  if ((_stateHandler || _readingSubscriptionCount || _textSubscriptionCount || _booleanSubscriptionCount) &&
+      _stateEndpoint.length() && isDue(now, _nextStatePollAt)) fetchState();
 }
 bool TrioeClient::addReading(const char* name, float value, const char* unit) { return queueNumeric(name, value, kNumber, unit); }
 bool TrioeClient::addReading(const char* name, int value, const char* unit) { return queueNumeric(name, value, kInteger, unit); }
@@ -40,10 +42,89 @@ bool TrioeClient::pollCommands() {
   for (JsonVariantConst command : doc["commands"].as<JsonArrayConst>()) _commandHandler(command);
   return true;
 }
+bool TrioeClient::fetchState() {
+  if (!_started ||
+      (!_stateHandler && !_readingSubscriptionCount && !_textSubscriptionCount && !_booleanSubscriptionCount) ||
+      !_stateEndpoint.length() || WiFi.status() != WL_CONNECTED) return false;
+  _nextStatePollAt = millis() + _statePollIntervalMs;
+  if (!_http.begin(_secureClient, _stateEndpoint)) return false;
+  _http.setReuse(true); _http.addHeader("Authorization", "Bearer " + _apiKey); _lastHttpStatus = _http.GET();
+  if (_lastHttpStatus < 200 || _lastHttpStatus >= 300) { _http.end(); return false; }
+  StaticJsonDocument<TRIOE_JSON_DOCUMENT_SIZE> doc;
+  const DeserializationError error = deserializeJson(doc, _http.getStream()); _http.end();
+  if (error || !doc["data"].is<JsonArray>()) return false;
+  for (JsonObjectConst stream : doc["data"].as<JsonArrayConst>()) {
+    if (_stateHandler) _stateHandler(stream);
+    const char* name = stream["name"] | "";
+    JsonVariantConst value = stream["current_value"];
+    if (!name[0]) continue;
+    for (uint8_t i = 0; i < _readingSubscriptionCount; ++i) {
+      if (value.is<float>() && !strcmp(name, _readingSubscriptions[i].name) && _readingSubscriptions[i].handler) {
+        _readingSubscriptions[i].handler(value.as<float>());
+      }
+    }
+    for (uint8_t i = 0; i < _textSubscriptionCount; ++i) {
+      if (value.is<const char*>() && !strcmp(name, _textSubscriptions[i].name) && _textSubscriptions[i].handler) {
+        _textSubscriptions[i].handler(value.as<const char*>());
+      }
+    }
+    for (uint8_t i = 0; i < _booleanSubscriptionCount; ++i) {
+      if (value.is<bool>() && !strcmp(name, _booleanSubscriptions[i].name) && _booleanSubscriptions[i].handler) {
+        _booleanSubscriptions[i].handler(value.as<bool>());
+      }
+    }
+  }
+  return true;
+}
 void TrioeClient::setCommandEndpoint(const char* endpoint) { _commandEndpoint = endpoint ? endpoint : ""; }
 void TrioeClient::setCommandHandler(CommandHandler handler) { _commandHandler = handler; }
+void TrioeClient::setStateEndpoint(const char* endpoint) { _stateEndpoint = endpoint ? endpoint : ""; }
+void TrioeClient::setStateHandler(StateHandler handler) { _stateHandler = handler; }
+bool TrioeClient::onReading(const char* name, NumericReadingHandler handler) {
+  if (!name || !name[0] || !handler) return false;
+  for (uint8_t i = 0; i < _readingSubscriptionCount; ++i) {
+    if (!strcmp(name, _readingSubscriptions[i].name)) {
+      _readingSubscriptions[i].handler = handler;
+      return true;
+    }
+  }
+  if (_readingSubscriptionCount >= TRIOE_MAX_READING_HANDLERS) return false;
+  ReadingSubscription& subscription = _readingSubscriptions[_readingSubscriptionCount++];
+  copyText(subscription.name, sizeof(subscription.name), name);
+  subscription.handler = handler;
+  return true;
+}
+bool TrioeClient::onText(const char* name, TextReadingHandler handler) {
+  if (!name || !name[0] || !handler) return false;
+  for (uint8_t i = 0; i < _textSubscriptionCount; ++i) {
+    if (!strcmp(name, _textSubscriptions[i].name)) {
+      _textSubscriptions[i].handler = handler;
+      return true;
+    }
+  }
+  if (_textSubscriptionCount >= TRIOE_MAX_READING_HANDLERS) return false;
+  TextSubscription& subscription = _textSubscriptions[_textSubscriptionCount++];
+  copyText(subscription.name, sizeof(subscription.name), name);
+  subscription.handler = handler;
+  return true;
+}
+bool TrioeClient::onBoolean(const char* name, BooleanReadingHandler handler) {
+  if (!name || !name[0] || !handler) return false;
+  for (uint8_t i = 0; i < _booleanSubscriptionCount; ++i) {
+    if (!strcmp(name, _booleanSubscriptions[i].name)) {
+      _booleanSubscriptions[i].handler = handler;
+      return true;
+    }
+  }
+  if (_booleanSubscriptionCount >= TRIOE_MAX_READING_HANDLERS) return false;
+  BooleanSubscription& subscription = _booleanSubscriptions[_booleanSubscriptionCount++];
+  copyText(subscription.name, sizeof(subscription.name), name);
+  subscription.handler = handler;
+  return true;
+}
 void TrioeClient::setReportingInterval(uint32_t ms) { _reportingIntervalMs = ms; }
 void TrioeClient::setCommandPollInterval(uint32_t ms) { _commandPollIntervalMs = ms; }
+void TrioeClient::setStatePollInterval(uint32_t ms) { _statePollIntervalMs = ms < 1000 ? 1000 : ms; }
 void TrioeClient::setChangeThreshold(float value) { _changeThreshold = value < 0 ? 0 : value; }
 void TrioeClient::setRetryDelays(uint32_t base, uint32_t maximum) { _retryBaseDelayMs = base; _retryMaxDelayMs = maximum < base ? base : maximum; }
 void TrioeClient::setCACert(const char* certificate) { if (certificate) { _secureClient.setCACert(certificate); _certificateConfigured = true; } }

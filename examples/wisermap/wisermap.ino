@@ -16,8 +16,16 @@ void setup() {
 }
 
 void loop() {
-  float temperature = 20.0f + (analogRead(34) / 4095.0f) * 15.0f;
+  // Dummy data for testing without physical sensors.
+  float temperature = 25.5f;
+  float humidity = 60.0f;
+  const char* message = "Hello from TRIOE";
+  bool pumpState = true;
+
   trioe.addReading("temperature", temperature, "C");
-  trioe.addReading("online", WiFi.status() == WL_CONNECTED);
+  trioe.addReading("humidity", humidity, "%");
+  trioe.addReading("message", message);
+  trioe.addReading("pump", pumpState);
+
   trioe.loop();  // No delay(): sends/retries only when due.
 }
